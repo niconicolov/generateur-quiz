@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Générateur de Quiz FLE (avec IA)</title>
+    <!-- Chargement de Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Police Inter */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Style pour la surbrillance des réponses */
+        .correct-answer {
+            background-color: #d1fae5; /* Vert clair */
+            border: 2px solid #10b981; /* Vert */
+        }
+        .wrong-answer {
+            background-color: #fee2e2; /* Rouge clair */
+            border: 2px solid #ef4444; /* Rouge */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-2xl p-6 md:p-8 rounded-xl shadow-lg">
+        
+        <h1 class="text-2xl md:text-3xl font-bold text-center text-blue-700 mb-6">
+            Générateur de Quiz FLE (avec IA)
+        </h1>
+        <p class="text-center text-gray-600 mb-8">
+            Sélectionnez un niveau, un nombre de questions, et écrivez un sujet.
+        </p>
+
+        <!-- Section de Configuration du Quiz -->
+        <div class="flex flex-col gap-4 mb-6">
+            <div class="flex flex-col md:flex-row gap-4">
+                <!-- Sélection du Niveau -->
+                <div class="flex-1">
+                    <label for="level-select" class="block text-sm font-medium text-gray-700 mb-2">
+                        Niveau (CECRL):
+                    </label>
+                    <select id="level-select" class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">-- Choisir un niveau --</option>
+                        <option value="A1">A1 - Découverte</option>
+                        <option value="A2">A2 - Survie</option>
+                        <option value="B1">B1 - Seuil</option>
+                        <option value="B2">B2 - Avancé</option>
+                        <option value="C1">C1 - Autonome</option>
+                    </select>
+                </div>
+                
+                <!-- Sélection du Nombre de questions -->
+                <div class="flex-1">
+                    <label for="num-questions-select" class="block text-sm font-medium text-gray-700 mb-2">
+                        Nombre de questions:
+                    </label>
+                    <select id="num-questions-select" class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="8">8</option>
+                        <option value="9">9</option>
+                        <option value="10">10</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Sujet Personnalisé -->
+            <div>
+                <label for="topic-input" class="block text-sm font-medium text-gray-700 mb-2">
+                    Sujet (Personnalisé):
+                </label>
+                <input type="text" id="topic-input" class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: Le futur simple, La nourriture...">
+            </div>
+        </div>
+
+        <!-- Bouton de Génération -->
+        <button id="generate-btn" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 transition duration-300 shadow-md">
+            Générer le Quiz
+        </button>
+
+        <!-- Conteneur pour le Quiz -->
+        <div id="quiz-container" class="mt-8"></div>
+        
+        <!-- Conteneur pour le Score -->
+        <div id="score-container" class="mt-6 text-center"></div>
+
+    </div>
+
+    <script>
+        // --- SÉLECTION DES ÉLIMENTS DU DOM ---
+        const levelSelect = document.getElementById('level-select');
+        const numQuestionsSelect = document.getElementById('num-questions-select');
+        const topicInput = document.getElementById('topic-input');
+        const generateBtn = document.getElementById('generate-btn');
+        const quizContainer = document.getElementById('quiz-container');
+        const scoreContainer = document.getElementById('score-container');
+
+        // Clé API (laissée vide, sera gérée par l'environnement d'exécution)
+        const apiKey = ""; // Ne pas modifier
+
+        let currentQuestions = []; // Pour stocker les questions du quiz actuel
+
+        // --- GESTION DES ÉVÉNEMENTS ---
+
+        // 1. Générer le quiz quand on clique sur le bouton
+        generateBtn.addEventListener('click', generateQuiz);
+
+        // --- FONCTIONS ---
+
+        /**
+         * Fonction de backoff exponentiel pour les appels API
+         */
+        async function exponentialBackoff(fetchCall, maxRetries = 5) {
+            let delay = 1000;
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetchCall();
+                    if (response.ok) {
+                        return response.json();
+                    } else if (response.status === 429 || response.status >= 500) {
+                        // Throttling ou erreur serveur, on réessaie
+                        console.warn(`Attempt ${i + 1} failed, retrying in ${delay}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        delay *= 2;
+                    } else {
+                        // Autre erreur (ex: 400 Bad Request), on ne réessaie pas
+                        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+                    }
+                } catch (error) {
+                    if (i === maxRetries - 1) throw error;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2;
+                }
+            }
+        }
+
+        /**
+         * Génère et affiche le formulaire de quiz basé sur l'IA.
+         */
+        async function generateQuiz() {
+            const level = levelSelect.value;
+            const topic = topicInput.value;
+            const numQuestions = parseInt(numQuestionsSelect.value, 10);
+
+            if (!level || !topic) {
+                quizContainer.innerHTML = '<p class="text-red-500 text-center">Veuillez choisir un niveau ET entrer un sujet.</p>';
+                return;
+            }
+
+            // Afficher un état de chargement
+            generateBtn.disabled = true;
+            generateBtn.textContent = 'Génération en cours...';
+            quizContainer.innerHTML = '<p class="text-center text-gray-600">Génération du quiz par l\'IA, veuillez patienter...</p>';
+            scoreContainer.innerHTML = '';
+            currentQuestions = [];
+
+            // 1. Définir le "Prompt" (instruction) pour l'IA
+            const systemPrompt = "Tu es un assistant expert en FLE (Français Langue Étrangère). Ta tâche est de générer des questions de quiz pour des apprenants. Tu dois TOUJOURS répondre en JSON.";
+            const userQuery = `Génère exactement ${numQuestions} questions de quiz de niveau ${level} (CECRL) sur le sujet suivant : "${topic}". Les questions doivent être au format QCM (Choix Multiple) avec 3 options. Assure-toi qu'une seule réponse est correcte.`;
+
+            // 2. Définir le schéma JSON de la réponse attendue
+            const schema = {
+                type: "ARRAY",
+                items: {
+                    type: "OBJECT",
+                    properties: {
+                        q: { type: "STRING" },
+                        options: { type: "ARRAY", items: { type: "STRING" } },
+                        answer: { type: "STRING" }
+                    },
+                    required: ["q", "options", "answer"]
+                }
+            };
+
+            // 3. Préparer le payload de l'API
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: schema
+                }
+            };
+
+            // 4. Appeler l'API avec gestion des erreurs
+            try {
+                const fetchCall = () => fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await exponentialBackoff(fetchCall);
+
+                if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts[0].text) {
+                    // L'IA retourne le JSON sous forme de chaîne de texte, il faut le parser
+                    const jsonText = result.candidates[0].content.parts[0].text;
+                    const questions = JSON.parse(jsonText);
+                    currentQuestions = questions;
+                    displayQuiz(currentQuestions);
+                } else {
+                    throw new Error("Réponse de l'IA invalide ou vide.");
+                }
+
+            } catch (error) {
+                console.error("Erreur lors de la génération du quiz:", error);
+                quizContainer.innerHTML = `<p class="text-red-500 text-center">Désolé, une erreur est survenue lors de la génération du quiz. (Message: ${error.message})</p>`;
+            } finally {
+                // Rétablir le bouton
+                generateBtn.disabled = false;
+                generateBtn.textContent = 'Générer le Quiz';
+            }
+        }
+
+        /**
+         * Affiche le formulaire de quiz une fois les questions reçues
+         */
+        function displayQuiz(questions) {
+            quizContainer.innerHTML = ''; // Nettoyer le message de chargement
+            
+            const form = document.createElement('form');
+            form.id = 'quiz-form';
+            
+            questions.forEach((question, index) => {
+                const questionElement = document.createElement('div');
+                questionElement.className = 'mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200';
+                
+                const questionText = document.createElement('p');
+                questionText.className = 'text-lg font-medium text-gray-800 mb-4';
+                questionText.textContent = `${index + 1}. ${question.q}`;
+                questionElement.appendChild(questionText);
+
+                const optionsContainer = document.createElement('div');
+                optionsContainer.className = 'space-y-2';
+
+                // Mélanger les options
+                const shuffledOptions = [...question.options].sort(() => Math.random() - 0.5);
+
+                shuffledOptions.forEach(option => {
+                    const label = document.createElement('label');
+                    label.className = 'flex items-center p-3 border rounded-lg hover:bg-gray-100 cursor-pointer transition-all';
+                    
+                    const radio = document.createElement('input');
+                    radio.type = 'radio';
+                    radio.name = `question-${index}`;
+                    radio.value = option;
+                    radio.className = 'mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300';
+                    
+                    label.appendChild(radio);
+                    label.appendChild(document.createTextNode(option));
+                    optionsContainer.appendChild(label);
+                });
+                
+                questionElement.appendChild(optionsContainer);
+                form.appendChild(questionElement);
+            });
+
+            // Bouton de validation
+            const submitButton = document.createElement('button');
+            submitButton.type = 'submit';
+            submitButton.textContent = 'Valider mes réponses';
+            submitButton.className = 'w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700 transition duration-300 shadow-md';
+            
+            form.appendChild(submitButton);
+            quizContainer.appendChild(form);
+            
+            form.addEventListener('submit', handleSubmit);
+        }
+
+        /**
+         * Gère la validation du quiz, vérifie les réponses et affiche le score.
+         */
+        function handleSubmit(event) {
+            event.preventDefault(); // Empêcher l'envoi du formulaire
+            
+            const form = event.target; // C'est le formulaire lui-même
+            const formData = new FormData(form);
+            let score = 0;
+            
+            currentQuestions.forEach((question, index) => {
+                const userAnswer = formData.get(`question-${index}`);
+
+                // Désactiver tous les radios pour cette question
+                const radios = form.querySelectorAll(`input[name="question-${index}"]`);
+                radios.forEach(radio => {
+                    radio.disabled = true;
+                });
+
+                if (userAnswer === question.answer) {
+                    score++;
+                }
+            });
+
+            // Afficher le score et le bouton de correction
+            scoreContainer.innerHTML = `
+                <h2 class="text-2xl font-bold text-gray-800">Votre Score</h2>
+                <p class="text-3xl font-bold ${score === currentQuestions.length ? 'text-green-600' : 'text-blue-600'} mt-2">
+                    ${score} / ${currentQuestions.length}
+                </p>
+                <button id="show-answers-btn" class="mt-4 bg-yellow-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-yellow-600 transition duration-300 shadow-md">
+                    Voir les corrections
+                </button>
+            `;
+            
+            // Ajouter l'écouteur au nouveau bouton
+            document.getElementById('show-answers-btn').addEventListener('click', showCorrections);
+            
+            // Désactiver le bouton de validation
+            form.querySelector('button[type="submit"]').disabled = true;
+        }
+
+        /**
+         * Affiche les corrections (bonnes et mauvaises réponses) sur le formulaire.
+         */
+        function showCorrections() {
+            const form = document.getElementById('quiz-form');
+            if (!form) return;
+
+            const questionElements = form.querySelectorAll('.mb-6'); // Sélectionne chaque bloc de question
+
+            currentQuestions.forEach((question, index) => {
+                const questionElement = questionElements[index];
+                
+                // Trouver la réponse de l'utilisateur (le radio qui est coché)
+                const checkedRadio = questionElement.querySelector(`input[name="question-${index}"]:checked`);
+                const userAnswer = checkedRadio ? checkedRadio.value : null;
+                
+                const labels = questionElement.querySelectorAll('label');
+                
+                labels.forEach(label => {
+                    const radio = label.querySelector('input[type="radio"]');
+                    label.classList.remove('correct-answer', 'wrong-answer');
+
+                    if (radio.value === question.answer) {
+                        // C'est la bonne réponse
+                        label.classList.add('correct-answer');
+                    } else if (radio.value === userAnswer && userAnswer !== question.answer) {
+                        // C'est le mauvais choix de l'utilisateur
+                        label.classList.add('wrong-answer');
+                    }
+                    // Les radios sont déjà désactivés par handleSubmit
+                });
+            });
+
+            // Désactiver le bouton "Voir les corrections" pour éviter un reclic
+            const showBtn = document.getElementById('show-answers-btn');
+            if (showBtn) {
+                showBtn.disabled = true;
+                showBtn.textContent = 'Corrections affichées';
+            }
+        }
+
+    </script>
+</body>
+</html>
+
