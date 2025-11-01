@@ -4,10 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Générateur de Quiz FLE (avec IA)</title>
+    
+    <!-- Balises Open Graph (OG) pour le partage sur les réseaux sociaux -->
+    <meta property="og:title" content="Générateur de Quiz FLE (avec IA) 🇫🇷" />
+    <meta property="og:description" content="Créez instantanément des quiz FLE sur mesure, adaptés à votre niveau CECRL et à n'importe quel sujet, grâce à l'intelligence artificielle." />
+    <meta property="og:image" content="https://placehold.co/1200x630/4F46E5/ffffff?text=Quiz+FLE+%2F+Générateur+IA" />
+    <!-- L'URL réelle de l'application déployée -->
+    <meta property="og:url" content="https://generateur-quiz-1.onrender.com" /> 
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="fr_FR" />
+    <!-- Fin des balises Open Graph -->
+    
     <!-- Chargement de Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Police Inter */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
         body {
             font-family: 'Inter', sans-serif;
         }
@@ -280,6 +292,21 @@
             const formData = new FormData(form);
             let score = 0;
             
+            // Vérification simple que toutes les questions ont une réponse cochée
+            let allAnswered = true;
+            for (let i = 0; i < currentQuestions.length; i++) {
+                if (!formData.get(`question-${i}`)) {
+                    allAnswered = false;
+                    break;
+                }
+            }
+
+            if (!allAnswered) {
+                // Remplacer alert() par un message d'alerte visible
+                scoreContainer.innerHTML = '<p class="p-3 bg-red-100 text-red-700 font-medium rounded-lg">Veuillez répondre à toutes les questions avant de valider.</p>';
+                return;
+            }
+
             currentQuestions.forEach((question, index) => {
                 const userAnswer = formData.get(`question-${index}`);
 
@@ -356,5 +383,7 @@
     </script>
 </body>
 </html>
+
+
 
 
